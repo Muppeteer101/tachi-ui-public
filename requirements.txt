@@ -1,1 +1,8 @@
-streamlit
+gradio
+torch
+diffusers
+transformers
+TTS
+Pillow
+moviepy
+opencv-python
