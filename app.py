@@ -1,63 +1,76 @@
 import gradio as gr
-import torch
-import tempfile
-import os
-
-# Optional: load TTS
-from TTS.api import TTS
 from PIL import Image
-from diffusers import StableDiffusionPipeline
+import numpy as np
 from moviepy.editor import ImageSequenceClip
+import soundfile as sf
 
-# Load models (light versions assumed)
-tts = TTS(model_name="tts_models/en/ljspeech/tacotron2-DDC")
-stable_diff = StableDiffusionPipeline.from_pretrained("runwayml/stable-diffusion-v1-5")
-stable_diff.to("cuda" if torch.cuda.is_available() else "cpu")
 
-def generate_speech(text):
-    wav = tts.tts_to_file(text=text, file_path="output.wav")
-    return "output.wav"
+def transcribe(audio_file: str) -> str:
+    """Simple voice tab: return duration of uploaded audio."""
+    if not audio_file:
+        return "No audio uploaded."
+    try:
+        data, samplerate = sf.read(audio_file)
+        duration = len(data) / float(samplerate)
+        return f"Received audio of {duration:.2f} seconds."
+    except Exception as e:
+        return f"Error processing audio: {e}"  # return error message
 
-def text_to_image(prompt):
-    image = stable_diff(prompt).images[0]
-    temp_path = os.path.join(tempfile.gettempdir(), "gen_image.png")
-    image.save(temp_path)
-    return temp_path
 
-def text_or_image_to_video(text, image=None):
+def generate_image(prompt: str) -> Image.Image:
+    """Generate a random image as a placeholder for AI image generation."""
+    # Create a 512x512 random RGB image
+    width, height = 512, 512
+    arr = np.random.randint(0, 256, (height, width, 3), dtype=np.uint8)
+    return Image.fromarray(arr)
+
+
+def generate_video(prompt: str) -> str:
+    """Generate a short random video and return the file path."""
+    # Generate 10 frames of random pixels
     frames = []
-    prompt = text if text else "An evolving visual scene"
-    for i in range(8):
-        img = stable_diff(f"{prompt}, frame {i}").images[0]
-        frame_path = os.path.join(tempfile.gettempdir(), f"frame_{i}.png")
-        img.save(frame_path)
-        frames.append(frame_path)
+    for _ in range(10):
+        frame = np.random.randint(0, 256, (256, 256, 3), dtype=np.uint8)
+        frames.append(frame)
     clip = ImageSequenceClip(frames, fps=2)
-    output_path = os.path.join(tempfile.gettempdir(), "output_video.mp4")
-    clip.write_videofile(output_path, codec="libx264")
-    return output_path
+    video_path = "/tmp/generated_video.mp4"
+    # Write the video file
+    clip.write_videofile(video_path, codec="libx264", audio=False, verbose=False, logger=None)
+    return video_path
 
+
+def handle_files(uploaded_files) -> str:
+    """Return a message summarizing uploaded files."""
+    if not uploaded_files:
+        return "No files uploaded."
+    return f"Received {len(uploaded_files)} file(s)."
+
+
+# Build the Gradio interface with tabs
 with gr.Blocks() as demo:
-    gr.Markdown("# Tachi - Digital Twin Interface")
+    gr.Markdown("# Tachi Interface Demo\nThis interface demonstrates voice, image, video, and file upload capabilities.")
 
-    with gr.Tab("Text to Speech"):
-        txt_input = gr.Textbox(label="Say this")
-        speak_btn = gr.Button("Generate Voice")
-        audio_out = gr.Audio(label="Tachi says", type="filepath")
-        speak_btn.click(generate_speech, inputs=txt_input, outputs=audio_out)
+    with gr.Tab(label="Voice"):
+        audio_input = gr.Audio(source="upload", type="filepath", label="Upload Audio")
+        voice_output = gr.Textbox(label="Result")
+        audio_input.change(fn=transcribe, inputs=audio_input, outputs=voice_output)
 
-    with gr.Tab("Text to Image"):
-        txt2img_input = gr.Textbox(label="Describe an image")
-        txt2img_btn = gr.Button("Generate Image")
-        img_output = gr.Image(label="Result")
-        txt2img_btn.click(text_to_image, inputs=txt2img_input, outputs=img_output)
+    with gr.Tab(label="Image"):
+        text_input = gr.Textbox(label="Prompt", placeholder="Describe the image you want to generate")
+        image_output = gr.Image(label="Generated Image")
+        text_input.submit(fn=generate_image, inputs=text_input, outputs=image_output)
 
-    with gr.Tab("Text/Image to Video"):
-        txt_vid_input = gr.Textbox(label="Describe a video scene")
-        img_vid_input = gr.Image(label="Optional starting image", optional=True)
-        vid_btn = gr.Button("Generate Video")
-        vid_output = gr.Video(label="Generated Video")
-        vid_btn.click(text_or_image_to_video, inputs=[txt_vid_input, img_vid_input], outputs=vid_output)
+    with gr.Tab(label="Video"):
+        video_prompt = gr.Textbox(label="Prompt", placeholder="Describe the video you want to generate")
+        video_output = gr.Video(label="Generated Video")
+        video_prompt.submit(fn=generate_video, inputs=video_prompt, outputs=video_output)
+
+    with gr.Tab(label="File Upload"):
+        file_input = gr.File(label="Upload Files", file_count="multiple")
+        file_status = gr.Textbox(label="Status")
+        file_input.change(fn=handle_files, inputs=file_input, outputs=file_status)
+
 
 if __name__ == "__main__":
-    demo.launch(server_name="0.0.0.0", server_port=8051)
+    # Launch the app on all network interfaces so Runpod can expose it
+    demo.launch(server_name="0.0.0.0", server_port=8888, show_error=True)
